@@ -37,15 +37,16 @@ dynamics_ode = vertcat(
 )
 
 # Objective term
-stage_cost = (
+lc = (
     1e0 * x1**2
     + 1e1 * (x2 - pi) ** 2
     + 1e-1 * x3**2
     + 1e-1 * x4**2
     + 1e-3 * control**2
 )
-final_cost = 1e0 * x1**2 + 1e1 * (x2 - pi) ** 2 + 1e-1 * x3**2 + 1e-1 * x4**2
-Vf = Function("Vf", [state], [final_cost])
+stage_cost = Function("l", [state, control], [0.5*lc])
+Vf = 1e0 * x1**2 + 1e1 * (x2 - pi) ** 2 + 1e-1 * x3**2 + 1e-1 * x4**2
+final_cost = Function("Vf", [state], [Vf])
 
 
 # constraints
@@ -62,22 +63,21 @@ pc_lb = -inf
 # Formulate discrete time dynamics
 disc_step = 0.05
 down_sampling = 1
-disc_dynamics_cost = single_shooting_transcription(
-    state, control, dynamics_ode, stage_cost, disc_step, down_sampling
+disc_dynamics = single_shooting_transcription(
+    state, control, dynamics_ode, disc_step, down_sampling
 )
 
 # mpc steps and time
 sim_steps = 100
 sim_time = sim_steps * disc_step
-control_steps = 20
+horizon = 20
 
 
 # initial state
 optimal_states = [[0.0, 0.0, 0.0, 0.0]]
 
 # initial solution guess
-
-nlp_sol = np.zeros((control_steps, control_dim))
+nlp_sol = np.zeros((horizon, control_dim))
 
 # variable to store optimal controls
 optimal_controls = []
@@ -88,22 +88,24 @@ for k in range(sim_steps):
     nlp_sol = single_shooting_nlp(
         optimal_states[-1],
         nlp_sol,
-        disc_dynamics_cost,
-        Vf,
+        disc_dynamics,
+        stage_cost,
+        final_cost,
+        disc_step,
         ctrl_lb,
         ctrl_ub,
         path_constraints,
         pc_lb,
         pc_ub,
         control_dim,
-        control_steps,
+        horizon,
     )
 
     # store first value of optimal control sequence
     optimal_controls = vcat([optimal_controls, nlp_sol[0]])
 
     # apply control
-    Fk = disc_dynamics_cost(x0=optimal_states[-1], p=nlp_sol[0])
+    Fk = disc_dynamics(x0=optimal_states[-1], p=nlp_sol[0])
     optimal_states += [Fk["xf"].full()]
 
 # plot solution

@@ -2,34 +2,34 @@ from casadi import *
 
 
 def single_shooting_transcription(
-    state_variable, control_variable, dynamics, objective, sampling_time, down_sampling
+    state_variable, control_variable, dynamics, sampling_time, down_sampling
 ):
     # Formulate discrete time dynamics
-    f = Function("f", [state_variable, control_variable], [dynamics, objective])
+    f = Function("f", [state_variable, control_variable], [dynamics])
     X0 = MX.sym("X0", state_variable.shape[0])
     U = MX.sym("U", control_variable.shape[0])
     X = X0
-    Q = 0
 
     # Fixed step Runge-Kutta 4 integrator
     for j in range(down_sampling):
-        k1, k1_q = f(X, U)
-        k2, k2_q = f(X + sampling_time / 2 * k1, U)
-        k3, k3_q = f(X + sampling_time / 2 * k2, U)
-        k4, k4_q = f(X + sampling_time * k3, U)
+        k1 = f(X, U)
+        k2 = f(X + sampling_time / 2 * k1, U)
+        k3 = f(X + sampling_time / 2 * k2, U)
+        k4 = f(X + sampling_time * k3, U)
         X = X + sampling_time / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-        Q = Q + sampling_time / 6 * (k1_q + 2 * k2_q + 2 * k3_q + k4_q)
 
     # discretized dynamics and stage cost
-    F = Function("F", [X0, U], [X, Q], ["x0", "p"], ["xf", "qf"])
+    F = Function("F", [X0, U], [X], ["x0", "p"], ["xf"])
     return F
 
 
 def single_shooting_nlp(
     initial_state,
     initial_guess,
-    disc_dynamics_and_cost,
+    disc_dynamics,
+    stage_cost,
     final_cost,
+    sim_step,
     ctrl_lb,
     ctrl_ub,
     path_constraints,
@@ -56,10 +56,12 @@ def single_shooting_nlp(
         lbw = vcat((lbw, ctrl_lb))
         ubw = vcat((ubw, ctrl_ub))
 
+        # Integrate cost as Riemann sum
+        J = J + stage_cost(Xk, Uk) * sim_step
+
         # Integrate till the end of the interval
-        Fk = disc_dynamics_and_cost(x0=Xk, p=Uk)
+        Fk = disc_dynamics(x0=Xk, p=Uk)
         Xk = Fk["xf"]
-        J = J + Fk["qf"]
 
         # Add path constraints
         g += [path_constraints(Xk)]

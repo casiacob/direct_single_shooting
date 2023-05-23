@@ -20,13 +20,14 @@ damping = 1e-3
 dynamics_ode = vertcat(x2, -gravity / length * sin(x1) + (control - damping * x2) / (mass * length))
 
 # Objective term
-stage_cost = 1e1 * (x1 - pi) ** 2 + 1e-1 * x2**2 + 1e-3 * control**2
-final_cost = 1e1 * (x1 - pi) ** 2 + 1e-1 * x2**2
-Vf = Function("Vf", [state], [final_cost])
+lc = 2e0 * (fmod(x1, 2*pi) - pi) ** 2 + 1e-1 * x2**2 + 1e-3 * control**2
+stage_cost = Function("l", [state, control], [0.5 * lc])
+Vf = 2e0 * (fmod(x1, 2*pi) - pi) ** 2 + 1e-1 * x2**2
+final_cost = Function("Vf", [state], [0.5 * Vf])
 
 # constraints
-ctrl_lb = -8.0
-ctrl_ub = 8.0
+ctrl_lb = -5.0
+ctrl_ub = 5.0
 path_constraints = Function(
     "g",
     [state],
@@ -39,21 +40,21 @@ pc_lb = -inf
 # Formulate discrete time dynamics
 disc_step = 0.01
 down_sampling = 5
-disc_dynamics_cost = single_shooting_transcription(
-    state, control, dynamics_ode, stage_cost, disc_step, down_sampling
+disc_dynamics = single_shooting_transcription(
+    state, control, dynamics_ode, disc_step, down_sampling
 )
 
 
 # mpc steps and time
 sim_steps = 100
 sim_time = sim_steps * disc_step
-control_steps = 15
+horizon = 40
 
 # intial state
-optimal_states = [[0.0, 0.0]]
+optimal_states = [[fmod(0.01, 2*pi), -0.01]]
 
 # initial solution guess
-nlp_sol = np.zeros((control_steps, control_dim))
+nlp_sol = np.zeros((horizon, control_dim))
 
 # variable to store optimal controls
 optimal_controls = []
@@ -63,22 +64,24 @@ for k in range(sim_steps):
     nlp_sol = single_shooting_nlp(
         optimal_states[-1],
         nlp_sol,
-        disc_dynamics_cost,
-        Vf,
+        disc_dynamics,
+        stage_cost,
+        final_cost,
+        disc_step,
         ctrl_lb,
         ctrl_ub,
         path_constraints,
         pc_lb,
         pc_ub,
         control_dim,
-        control_steps,
+        horizon,
     )
 
     # store first value of optimal controls sequence
     optimal_controls = vcat([optimal_controls, nlp_sol[0]])
 
     # apply control
-    Fk = disc_dynamics_cost(x0=optimal_states[-1], p=nlp_sol[0])
+    Fk = disc_dynamics(x0=optimal_states[-1], p=nlp_sol[0])
     optimal_states += [Fk["xf"].full()]
 
 # plot solution
